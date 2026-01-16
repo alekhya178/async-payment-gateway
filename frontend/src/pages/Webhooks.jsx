@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom'; // <--- Added Import
 
 const Webhooks = () => {
     const [webhookUrl, setWebhookUrl] = useState('');
     const [webhookSecret, setWebhookSecret] = useState('');
     const [logs, setLogs] = useState([]);
-    const [loading, setLoading] = useState(false);
 
     const headers = {
         'x-api-key': localStorage.getItem('api_key'),
@@ -12,7 +12,6 @@ const Webhooks = () => {
         'Content-Type': 'application/json'
     };
 
-    // Fetch Logs
     const fetchLogs = async () => {
         try {
             const res = await fetch('http://localhost:8000/api/v1/payments/merchant/webhooks', { headers });
@@ -21,13 +20,11 @@ const Webhooks = () => {
         } catch (err) { console.error(err); }
     };
 
-    // Save Configuration (Mock - usually updates merchant DB)
     const saveConfig = (e) => {
         e.preventDefault();
         alert('Configuration Saved! (This is a simulation for grading)');
     };
 
-    // Retry Webhook
     const retryWebhook = async (id) => {
         try {
             const res = await fetch(`http://localhost:8000/api/v1/payments/merchant/webhooks/${id}/retry`, {
@@ -36,20 +33,24 @@ const Webhooks = () => {
             });
             if (res.ok) {
                 alert('Retry Scheduled');
-                fetchLogs(); // Refresh list
+                fetchLogs();
             }
         } catch (err) { alert('Retry failed'); }
     };
 
     useEffect(() => {
         fetchLogs();
-        // Auto-refresh logs every 5 seconds
         const interval = setInterval(fetchLogs, 5000);
         return () => clearInterval(interval);
     }, []);
 
     return (
         <div data-test-id="webhook-config" style={{ padding: '20px' }}>
+            {/* ADDED LINK HERE */}
+            <Link to="/dashboard" style={{ display: 'block', marginBottom: '20px', color: '#666' }}>
+                &larr; Back to Dashboard
+            </Link>
+
             <h2>Webhook Configuration</h2>
             
             <form data-test-id="webhook-config-form" onSubmit={saveConfig} style={{ marginBottom: '30px', padding: '20px', border: '1px solid #ddd' }}>
@@ -75,11 +76,11 @@ const Webhooks = () => {
                     </button>
                 </div>
                 
-                <button type="submit" data-test-id="save-webhook-button" style={{ marginRight: '10px', padding: '8px 16px', background: '#007bff', color: 'white', border: 'none' }}>
+                <button type="submit" data-test-id="save-webhook-button" style={{ marginRight: '10px', padding: '8px 16px', background: '#007bff', color: 'white', border: 'none', cursor: 'pointer' }}>
                     Save Configuration
                 </button>
                 
-                <button type="button" data-test-id="test-webhook-button" style={{ padding: '8px 16px' }}>
+                <button type="button" data-test-id="test-webhook-button" style={{ padding: '8px 16px', cursor: 'pointer' }}>
                     Send Test Webhook
                 </button>
             </form>
@@ -109,13 +110,14 @@ const Webhooks = () => {
                                     data-test-id="retry-webhook-button" 
                                     data-webhook-id={log.id}
                                     onClick={() => retryWebhook(log.id)}
+                                    style={{ cursor: 'pointer' }}
                                 >
                                     Retry
                                 </button>
                             </td>
                         </tr>
                     ))}
-                    {logs.length === 0 && <tr><td colSpan="6" style={{ padding: '20px', textAlign: 'center' }}>No logs found</td></tr>}
+                    {logs.length === 0 && <tr><td colSpan="6" style={{ padding: '20px', textAlign: 'center', color: '#888' }}>No logs found</td></tr>}
                 </tbody>
             </table>
         </div>
