@@ -5,187 +5,182 @@ const Checkout = () => {
   const [searchParams] = useSearchParams();
   const orderId = searchParams.get('order_id');
   
-  // UI States
   const [order, setOrder] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [method, setMethod] = useState(null);
+  const [status, setStatus] = useState('initial'); // initial, processing, success, failed
+  const [paymentId, setPaymentId] = useState(null);
   
-  // 'initial' -> 'processing' -> 'success' or 'failed'
-  const [paymentStatus, setPaymentStatus] = useState('initial'); 
-  const [selectedMethod, setSelectedMethod] = useState(null);
+  // NEW: State for specific error messages
+  const [errorMessage, setErrorMessage] = useState('Payment could not be processed');
 
-  // Form Data
+  // Form States
   const [vpa, setVpa] = useState('');
   const [card, setCard] = useState({ number: '', expiry: '', cvv: '', name: '' });
 
+  // --- FIXED: Added Keys for the new Backend ---
   const API_KEY = 'key_test_abc123';
   const API_SECRET = 'secret_test_xyz789';
 
   useEffect(() => {
-    if (!orderId) { setError("Missing Order ID"); setLoading(false); return; }
-
-    fetch(`http://localhost:8000/api/v1/orders/${orderId}/public`)
-      .then(res => res.ok ? res.json() : Promise.reject("Order not found"))
-      .then(data => { setOrder(data); setLoading(false); })
-      .catch(err => { setError(err); setLoading(false); });
+    // Fetch Order Details
+    if (orderId) {
+        fetch(`http://localhost:8000/api/v1/orders/${orderId}/public`)
+            .then(res => res.json())
+            .then(data => setOrder(data))
+            .catch(err => console.error(err));
+    }
   }, [orderId]);
-
-  // --- THE POLLING LOGIC ---
-  const pollStatus = (paymentId) => {
-    const interval = setInterval(() => {
-      fetch(`http://localhost:8000/api/v1/payments/${paymentId}`)
-        .then(res => res.json())
-        .then(data => {
-          console.log("Polling Status:", data.status);
-          
-          if (data.status === 'success') {
-            clearInterval(interval);
-            setPaymentStatus('success');
-            window.parent.postMessage({ type: 'payment_success', data }, '*');
-          } 
-          else if (data.status === 'failed') {
-            clearInterval(interval);
-            setPaymentStatus('failed');
-            setError(data.error_description || "Payment Failed");
-            window.parent.postMessage({ type: 'payment_failed', data }, '*');
-          }
-          // If 'pending' or 'processing', do nothing and wait for next poll
-        })
-        .catch(err => console.error("Polling error", err));
-    }, 2000); // Check every 2 seconds
-  };
 
   const handlePayment = async (e) => {
     e.preventDefault();
-    setPaymentStatus('processing'); // 1. Show Spinner
-    
+    setStatus('processing');
+    setErrorMessage(''); // Clear previous errors
+
     const payload = {
-      order_id: orderId,
-      method: selectedMethod,
-      amount: order.amount,
-      vpa: selectedMethod === 'upi' ? vpa : undefined,
-      card: selectedMethod === 'card' ? { 
-        number: card.number, 
-        expiry_month: card.expiry.split('/')[0] || '12', 
-        expiry_year: card.expiry.split('/')[1] || '25', 
-        cvc: card.cvv 
-      } : undefined,
+        order_id: orderId,
+        method: method,
+        vpa: method === 'upi' ? vpa : undefined,
+        card: method === 'card' ? {
+            number: card.number,
+            expiry_month: card.expiry.split('/')[0],
+            expiry_year: card.expiry.split('/')[1],
+            cvv: card.cvv,
+            holder_name: card.name
+        } : undefined
     };
 
     try {
-      const res = await fetch('http://localhost:8000/api/v1/payments', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY, 'x-api-secret': API_SECRET },
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-
-      if (res.ok) {
-        // 2. Start Waiting (Polling) instead of showing success immediately
-        console.log("Payment Created (Pending). Starting Poll...");
-        pollStatus(data.id); 
-      } else {
-        setPaymentStatus('failed');
-        setError(data.error?.description || "Payment failed");
-      }
-    } catch (err) {
-      setPaymentStatus('failed');
-      setError("Network connection failed.");
+        // --- FIXED: Correct URL and Added Headers ---
+        const res = await fetch('http://localhost:8000/api/v1/payments', { // Removed /public
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'x-api-key': API_KEY,       // Added Key
+                'x-api-secret': API_SECRET  // Added Secret
+            },
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        
+        if (res.ok) {
+            setPaymentId(data.id);
+            pollStatus(data.id); // Start waiting for the Worker
+        } else {
+            // NEW LOGIC: Capture specific backend error
+            if (data.error && data.error.description) {
+                setErrorMessage(data.error.description);
+            } else {
+                setErrorMessage("Payment failed. Please check your details.");
+            }
+            setStatus('failed');
+        }
+    } catch (err) { 
+        setErrorMessage("Network connection failed.");
+        setStatus('failed'); 
     }
   };
 
-  if (loading) return <div style={{padding:'20px'}}>Loading...</div>;
+  const pollStatus = (pid) => {
+    const interval = setInterval(async () => {
+        try {
+            const res = await fetch(`http://localhost:8000/api/v1/payments/${pid}`);
+            const data = await res.json();
+            
+            console.log("Polling...", data.status); // Debug log
 
-  // --- SUCCESS VIEW ---
-  if (paymentStatus === 'success') {
-    return (
-      <div style={{ padding: '40px', textAlign: 'center', fontFamily: 'Arial', border: '1px solid #eee', borderRadius: '8px', maxWidth: '400px', margin: '20px auto' }}>
-        <div style={{ fontSize: '50px', marginBottom: '20px' }}>✅</div>
-        <h2 style={{color: 'green', margin: '0 0 10px 0'}}>Payment Successful!</h2>
-        <p style={{color: '#555'}}>Your transaction for ₹{order.amount/100} is complete.</p>
-        <div style={{marginTop: '20px', fontSize: '12px', color: '#999'}}>ID: {orderId}</div>
-      </div>
-    );
-  }
+            if (data.status === 'success') {
+                setStatus('success');
+                clearInterval(interval);
+                window.parent.postMessage({ type: 'payment_success', data }, '*');
+            } else if (data.status === 'failed') {
+                if (data.error_description) {
+                    setErrorMessage(data.error_description);
+                } else {
+                    setErrorMessage("Transaction declined by bank.");
+                }
+                setStatus('failed');
+                clearInterval(interval);
+                window.parent.postMessage({ type: 'payment_failed', data }, '*');
+            }
+            // If 'pending', keep waiting...
+        } catch (err) {
+            console.error("Polling Error", err);
+        }
+    }, 2000); // Check every 2 seconds
+  };
 
-  // --- MAIN FORM VIEW ---
+  if (!order) return <div>Loading Order...</div>;
+
   return (
-    <div style={{ padding: '25px', fontFamily: 'Arial', maxWidth: '450px', margin: '30px auto', border: '1px solid #dcdcdc', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
+    <div data-test-id="checkout-container" style={{ padding: '20px', maxWidth: '500px', margin: '0 auto', border: '1px solid #ccc' }}>
       
-      {/* Header */}
-      <div style={{ marginBottom: '25px', borderBottom: '1px solid #eee', paddingBottom: '15px' }}>
-        <h2 style={{ margin: '0 0 5px 0', fontSize: '24px' }}>Complete Payment</h2>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '15px' }}>
-          <span style={{ color: '#666' }}>Amount to Pay:</span>
-          <span style={{ fontSize: '20px', fontWeight: 'bold' }}>₹{order.amount / 100}</span>
+      {/* ORDER SUMMARY */}
+      <div data-test-id="order-summary" style={{ marginBottom: '20px', borderBottom: '1px solid #eee' }}>
+        <h2>Complete Payment</h2>
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span>Amount: </span><span data-test-id="order-amount">₹{order.amount / 100}</span>
         </div>
-        <div style={{ fontSize: '12px', color: '#aaa', marginTop: '5px' }}>Order ID: {orderId}</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span>Order ID: </span><span data-test-id="order-id">{orderId}</span>
+        </div>
       </div>
 
-      {/* Error Banner */}
-      {error && (
-        <div style={{ background: '#ffebee', color: '#c62828', padding: '10px', borderRadius: '6px', marginBottom: '20px', fontSize: '14px', textAlign: 'center' }}>
-          {error}
-        </div>
+      {/* SUCCESS STATE */}
+      {status === 'success' && (
+          <div data-test-id="success-state" style={{ color: 'green', textAlign: 'center' }}>
+              <h2>Payment Successful!</h2>
+              <div>Payment ID: <span data-test-id="payment-id">{paymentId}</span></div>
+              <span data-test-id="success-message">Your payment has been processed successfully</span>
+          </div>
       )}
 
-      {/* Processing State */}
-      {paymentStatus === 'processing' ? (
-        <div style={{ textAlign: 'center', padding: '40px 20px' }}>
-          <div className="spinner" style={{ fontSize: '30px', marginBottom: '15px', animation: 'spin 1s linear infinite' }}>🔄</div>
-          <h3 style={{ margin: '0 0 5px 0', color: '#333' }}>Processing Payment...</h3>
-          <p style={{ color: '#666', fontSize: '14px' }}>Please do not close this window.</p>
-        </div>
-      ) : (
-        /* Payment Methods */
+      {/* FAILED STATE */}
+      {status === 'failed' && (
+          <div data-test-id="error-state" style={{ color: 'red', textAlign: 'center' }}>
+              <h2>Payment Failed</h2>
+              
+              {/* NEW: Display the specific error message */}
+              <span data-test-id="error-message" style={{ display: 'block', fontWeight: 'bold', marginBottom: '10px' }}>
+                {errorMessage}
+              </span>
+              
+              <button data-test-id="retry-button" onClick={() => setStatus('initial')}>Try Again</button>
+          </div>
+      )}
+
+      {/* PROCESSING STATE */}
+      {status === 'processing' && (
+          <div data-test-id="processing-state" style={{ textAlign: 'center' }}>
+              <div className="spinner">...</div>
+              <span data-test-id="processing-message">Processing payment...</span>
+          </div>
+      )}
+
+      {/* INITIAL STATE - FORM */}
+      {status === 'initial' && (
         <>
-          <div style={{ display: 'flex', gap: '15px', marginBottom: '25px' }}>
-            <button 
-              onClick={() => setSelectedMethod('upi')}
-              style={{ flex: 1, padding: '12px', border: selectedMethod === 'upi' ? '2px solid #007bff' : '1px solid #ccc', borderRadius: '8px', background: selectedMethod === 'upi' ? '#f0f7ff' : 'white', cursor: 'pointer', fontWeight: 'bold' }}
-            >
-              UPI
-            </button>
-            <button 
-              onClick={() => setSelectedMethod('card')}
-              style={{ flex: 1, padding: '12px', border: selectedMethod === 'card' ? '2px solid #007bff' : '1px solid #ccc', borderRadius: '8px', background: selectedMethod === 'card' ? '#f0f7ff' : 'white', cursor: 'pointer', fontWeight: 'bold' }}
-            >
-              Card
-            </button>
+          <div data-test-id="payment-methods" style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
+            <button data-test-id="method-upi" onClick={() => setMethod('upi')} style={{ flex: 1, padding: '10px', background: method === 'upi' ? '#ddd' : '#fff' }}>UPI</button>
+            <button data-test-id="method-card" onClick={() => setMethod('card')} style={{ flex: 1, padding: '10px', background: method === 'card' ? '#ddd' : '#fff' }}>Card</button>
           </div>
 
-          {/* Forms */}
-          {selectedMethod === 'upi' && (
-            <form onSubmit={handlePayment}>
-              <div style={{ marginBottom: '20px' }}>
-                <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: 'bold' }}>UPI ID / VPA</label>
-                <input 
-                  placeholder="username@bank" 
-                  value={vpa} 
-                  onChange={e => setVpa(e.target.value)} 
-                  required 
-                  style={{ width: '100%', padding: '12px', borderRadius: '6px', border: '1px solid #ccc', fontSize: '16px', boxSizing: 'border-box' }} 
-                />
-              </div>
-              <button type="submit" style={{ width: '100%', padding: '14px', background: '#0056b3', color: 'white', border: 'none', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer' }}>
-                Pay ₹{order.amount / 100}
-              </button>
-            </form>
+          {method === 'upi' && (
+              <form data-test-id="upi-form" onSubmit={handlePayment}>
+                  <input data-test-id="vpa-input" placeholder="username@bank" value={vpa} onChange={e => setVpa(e.target.value)} required style={{ width: '100%', padding: '10px', marginBottom: '10px' }} />
+                  <button data-test-id="pay-button" type="submit" style={{ width: '100%', padding: '10px', background: 'blue', color: 'white' }}>Pay</button>
+              </form>
           )}
 
-          {selectedMethod === 'card' && (
-            <form onSubmit={handlePayment}>
-              <div style={{ marginBottom: '15px' }}>
-                <input placeholder="Card Number" value={card.number} onChange={e => setCard({...card, number: e.target.value})} required style={{ width: '100%', padding: '12px', borderRadius: '6px', border: '1px solid #ccc', marginBottom: '10px', boxSizing: 'border-box' }} />
-                <div style={{ display: 'flex', gap: '10px' }}>
-                  <input placeholder="MM/YY" value={card.expiry} onChange={e => setCard({...card, expiry: e.target.value})} required style={{ flex: 1, padding: '12px', borderRadius: '6px', border: '1px solid #ccc', boxSizing: 'border-box' }} />
-                  <input placeholder="CVV" value={card.cvv} onChange={e => setCard({...card, cvv: e.target.value})} required style={{ flex: 1, padding: '12px', borderRadius: '6px', border: '1px solid #ccc', boxSizing: 'border-box' }} />
-                </div>
-              </div>
-              <button type="submit" style={{ width: '100%', padding: '14px', background: '#0056b3', color: 'white', border: 'none', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer' }}>
-                Pay ₹{order.amount / 100}
-              </button>
-            </form>
+          {method === 'card' && (
+              <form data-test-id="card-form" onSubmit={handlePayment}>
+                  <input data-test-id="card-number-input" placeholder="Card Number" value={card.number} onChange={e => setCard({...card, number: e.target.value})} required style={{ width: '100%', padding: '10px', marginBottom: '10px' }} />
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    <input data-test-id="expiry-input" placeholder="MM/YY" value={card.expiry} onChange={e => setCard({...card, expiry: e.target.value})} required style={{ flex: 1, padding: '10px', marginBottom: '10px' }} />
+                    <input data-test-id="cvv-input" placeholder="CVV" value={card.cvv} onChange={e => setCard({...card, cvv: e.target.value})} required style={{ flex: 1, padding: '10px', marginBottom: '10px' }} />
+                  </div>
+                  <input data-test-id="cardholder-name-input" placeholder="Name on Card" value={card.name} onChange={e => setCard({...card, name: e.target.value})} required style={{ width: '100%', padding: '10px', marginBottom: '10px' }} />
+                  <button data-test-id="pay-button" type="submit" style={{ width: '100%', padding: '10px', background: 'blue', color: 'white' }}>Pay</button>
+              </form>
           )}
         </>
       )}
