@@ -14,22 +14,24 @@ const {
 } = require('../controllers/paymentController');
 const { protect } = require('../middleware/authMiddleware');
 
-// Public Routes (Checkout Page)
-router.post('/', processPayment); // Create Payment
-router.get('/:payment_id', getPayment); // Check Status
 
-// Merchant Protected Routes (Dashboard)
+//  added 'protect' because the we need authentication for payments
+router.post('/', protect, processPayment); 
+
+router.get('/:payment_id', getPayment);
+
+// Merchant Protected Routes
 router.get('/merchant/stats', protect, getDashboardStats);
 router.get('/merchant/transactions', protect, getTransactions);
-router.get('/merchant/webhooks', protect, getWebhookLogs); // New: List Webhooks
-router.post('/merchant/webhooks/:webhook_id/retry', protect, retryWebhook); // New: Retry Webhook
+router.get('/merchant/webhooks', protect, getWebhookLogs);
+router.post('/merchant/webhooks/:webhook_id/retry', protect, retryWebhook);
 
 // Payment Operations
-router.post('/:payment_id/capture', protect, capturePayment); // New: Capture
-router.post('/:payment_id/refunds', protect, createRefund);   // New: Create Refund
-router.get('/merchant/refunds/:refund_id', protect, getRefund); // New: Get Refund
+router.post('/:payment_id/capture', protect, capturePayment);
+router.post('/:payment_id/refunds', protect, createRefund);
+router.get('/merchant/refunds/:refund_id', protect, getRefund);
 
-// Testing Route (Required for Grading)
+// Testing Route
 router.get('/test/jobs/status', getJobStatus);
 
 module.exports = router;
