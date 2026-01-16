@@ -2,7 +2,7 @@ const pool = require('../config/db');
 const { validateLuhn, getCardNetwork, validateVPA, generateId } = require('../services/paymentService');
 const { paymentQueue, refundQueue, webhookQueue } = require('../config/queue');
 
-// 1. CREATE PAYMENT (Async + Idempotency + Crash Proof)
+// 1. CREATE PAYMENT (Async + Idempotency + Crash Proof + Expiry Check)
 const processPayment = async (req, res) => {
     try {
         const { order_id, method, vpa, card } = req.body;
@@ -51,6 +51,23 @@ const processPayment = async (req, res) => {
             paymentData.vpa = vpa;
         } else if (method === 'card') {
             if (!card || !validateLuhn(card.number)) return res.status(400).json({ error: { code: "INVALID_CARD", description: "Card validation failed" } });
+            
+            // --- NEW: EXPIRY DATE CHECK START ---
+            const currentYear = new Date().getFullYear(); // e.g. 2026
+            const currentMonth = new Date().getMonth() + 1; // e.g. 1 (January)
+            
+            // Handle 2-digit years (e.g., "21" -> 2021)
+            let expYear = parseInt(card.expiry_year);
+            if (expYear < 100) expYear += 2000; 
+
+            const expMonth = parseInt(card.expiry_month);
+
+            // Logic: If Exp Year is less than Current Year OR (Years are same AND Exp Month is less than Current Month)
+            if (expYear < currentYear || (expYear === currentYear && expMonth < currentMonth)) {
+                return res.status(400).json({ error: { code: "INVALID_CARD", description: "Card has expired" } });
+            }
+            // --- NEW: EXPIRY DATE CHECK END ---
+
             paymentData.card_network = getCardNetwork(card.number);
             paymentData.card_last4 = card.number.slice(-4);
         } else {
