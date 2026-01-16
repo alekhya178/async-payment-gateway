@@ -19,6 +19,17 @@ services:
       - pgdata:/var/lib/postgresql/data
       - ./backend/src/db/init.sql:/docker-entrypoint-initdb.d/init.sql
 
+  redis:
+    image: redis:7-alpine
+    container_name: redis_gateway
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
   api:
     build:
       context: ./backend
@@ -27,13 +38,32 @@ services:
       - "8000:8000"
     environment:
       DATABASE_URL: postgresql://gateway_user:gateway_pass@postgres:5432/payment_gateway
+      REDIS_URL: redis://redis:6379
       PORT: 8000
-      # THESE ARE REQUIRED FOR GRADING:
       TEST_MODE: "false" 
       TEST_PAYMENT_SUCCESS: "true"
       TEST_PROCESSING_DELAY: "1000"
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile  # We reuse the same Dockerfile as API
+    container_name: gateway_worker
+    command: node src/workers/index.js # This overrides the default 'npm start'
+    environment:
+      DATABASE_URL: postgresql://gateway_user:gateway_pass@postgres:5432/payment_gateway
+      REDIS_URL: redis://redis:6379
+      TEST_MODE: "false" 
+      WEBHOOK_RETRY_INTERVALS_TEST: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   dashboard:
