@@ -5,12 +5,18 @@ const Checkout = () => {
   const [searchParams] = useSearchParams();
   const orderId = searchParams.get('order_id');
   
+  // UI States
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [paymentStatus, setPaymentStatus] = useState('initial'); // initial, processing, success, failed
+  const [selectedMethod, setSelectedMethod] = useState(null); // 'upi' or 'card'
 
-  // Hardcoded keys for the checkout widget (In real life, these come from props or config)
+  // Form Input States
+  const [vpa, setVpa] = useState('');
+  const [card, setCard] = useState({ number: '', expiry: '', cvv: '', name: '' });
+
+  // Keys
   const API_KEY = 'key_test_abc123';
   const API_SECRET = 'secret_test_xyz789';
 
@@ -22,7 +28,7 @@ const Checkout = () => {
     }
 
     // Fetch Order Details
-    fetch(`http://localhost:8000/api/v1/orders/${orderId}/public`) // Using the Public route we made
+    fetch(`http://localhost:8000/api/v1/orders/${orderId}/public`)
       .then(res => {
         if (!res.ok) throw new Error("Order not found");
         return res.json();
@@ -37,20 +43,23 @@ const Checkout = () => {
       });
   }, [orderId]);
 
-  const handlePayment = async (method, vpa = null) => {
+  const handlePayment = async (e) => {
+    e.preventDefault(); // STOP page refresh
     setPaymentStatus('processing');
+    setError(null);
     
+    // Prepare Payload
     const payload = {
       order_id: orderId,
-      method: method,
-      amount: order.amount, // Include amount for validation
-      card: method === 'card' ? { 
-        number: "4242424242424242", 
-        expiry_month: "12", 
-        expiry_year: "30", 
-        cvc: "123" 
+      method: selectedMethod,
+      amount: order.amount,
+      vpa: selectedMethod === 'upi' ? vpa : undefined,
+      card: selectedMethod === 'card' ? { 
+        number: card.number, 
+        expiry_month: card.expiry.split('/')[0] || '12', 
+        expiry_year: card.expiry.split('/')[1] || '30', 
+        cvc: card.cvv 
       } : undefined,
-      vpa: method === 'upi' ? (vpa || "test@upi") : undefined
     };
 
     try {
@@ -58,8 +67,8 @@ const Checkout = () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-api-key': API_KEY,       // <--- CRITICAL: Sending Auth Headers
-          'x-api-secret': API_SECRET  // <--- CRITICAL: Sending Auth Headers
+          'x-api-key': API_KEY,       // <--- Sending Auth Headers
+          'x-api-secret': API_SECRET  // <--- Sending Auth Headers
         },
         body: JSON.stringify(payload)
       });
@@ -68,7 +77,6 @@ const Checkout = () => {
 
       if (res.ok) {
         setPaymentStatus('success');
-        // Notify parent window (for the SDK)
         window.parent.postMessage({ type: 'payment_success', data }, '*');
       } else {
         setPaymentStatus('failed');
@@ -82,46 +90,97 @@ const Checkout = () => {
   };
 
   if (loading) return <div style={{padding: '20px'}}>Loading Order...</div>;
-  if (error) return <div style={{padding: '20px', color: 'red'}}>Error: {error}</div>;
 
   if (paymentStatus === 'success') {
     return (
       <div style={{padding: '40px', textAlign: 'center', fontFamily: 'Arial'}}>
         <h2 style={{color: 'green'}}>Payment Successful!</h2>
-        <p>Order {orderId} has been processed.</p>
+        <p>Order {orderId} processed.</p>
         <p>You can close this window.</p>
       </div>
     );
   }
 
   return (
-    <div className="checkout-container" style={{ padding: '20px', fontFamily: 'Arial', maxWidth: '400px', margin: '0 auto', border: '1px solid #eee', borderRadius: '8px' }}>
-      <h2>Secure Checkout</h2>
-      <div style={{ marginBottom: '20px', padding: '10px', background: '#f9f9f9', borderRadius: '4px' }}>
-        <div><strong>Merchant:</strong> Test Merchant</div>
-        <div style={{ fontSize: '24px', fontWeight: 'bold', marginTop: '10px' }}>
-          ₹{order.amount / 100} <span style={{fontSize: '14px', color: '#666'}}>{order.currency}</span>
+    <div style={{ padding: '20px', fontFamily: 'Arial', maxWidth: '400px', margin: '0 auto', border: '1px solid #eee', borderRadius: '8px' }}>
+      
+      {/* HEADER */}
+      <div style={{ marginBottom: '20px', padding: '15px', background: '#f9f9f9', borderRadius: '4px' }}>
+        <h3 style={{marginTop: 0}}>Complete Payment</h3>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '18px', fontWeight: 'bold' }}>
+          <span>Amount:</span>
+          <span>₹{order.amount / 100}</span>
         </div>
+        <div style={{fontSize: '12px', color: '#666'}}>ID: {orderId}</div>
       </div>
 
-      {paymentStatus === 'processing' ? (
-        <div style={{textAlign: 'center', padding: '20px'}}>Processing Payment...</div>
-      ) : (
-        <div style={{display: 'flex', flexDirection: 'column', gap: '10px'}}>
+      {/* ERROR MESSAGE */}
+      {error && <div style={{color: 'red', marginBottom: '15px', textAlign: 'center'}}>{error}</div>}
+
+      {/* METHOD SELECTION TABS */}
+      {paymentStatus !== 'processing' && (
+        <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
           <button 
-            onClick={() => handlePayment('upi', 'user@upi')}
-            style={{padding: '12px', background: '#673ab7', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '16px'}}
+            onClick={() => setSelectedMethod('upi')}
+            style={{ 
+              flex: 1, padding: '10px', border: '1px solid #ccc', borderRadius: '4px', cursor: 'pointer',
+              background: selectedMethod === 'upi' ? '#e3f2fd' : 'white',
+              borderColor: selectedMethod === 'upi' ? '#2196f3' : '#ccc'
+            }}
           >
-            Pay with UPI
+            UPI
           </button>
           <button 
-            onClick={() => handlePayment('card')}
-            style={{padding: '12px', background: '#333', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '16px'}}
+            onClick={() => setSelectedMethod('card')}
+            style={{ 
+              flex: 1, padding: '10px', border: '1px solid #ccc', borderRadius: '4px', cursor: 'pointer',
+              background: selectedMethod === 'card' ? '#e3f2fd' : 'white',
+              borderColor: selectedMethod === 'card' ? '#2196f3' : '#ccc'
+            }}
           >
-            Pay with Card (Test)
+            Card
           </button>
         </div>
       )}
+
+      {/* UPI FORM */}
+      {selectedMethod === 'upi' && paymentStatus !== 'processing' && (
+        <form onSubmit={handlePayment}>
+          <input 
+            placeholder="example@upi" 
+            value={vpa} 
+            onChange={e => setVpa(e.target.value)} 
+            required 
+            style={{ width: '100%', padding: '10px', marginBottom: '15px', boxSizing: 'border-box' }} 
+          />
+          <button type="submit" style={{ width: '100%', padding: '12px', background: '#2196f3', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '16px' }}>
+            Pay ₹{order.amount / 100}
+          </button>
+        </form>
+      )}
+
+      {/* CARD FORM */}
+      {selectedMethod === 'card' && paymentStatus !== 'processing' && (
+        <form onSubmit={handlePayment}>
+          <input placeholder="Card Number" value={card.number} onChange={e => setCard({...card, number: e.target.value})} required style={{ width: '100%', padding: '10px', marginBottom: '10px', boxSizing: 'border-box' }} />
+          <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
+            <input placeholder="MM/YY" value={card.expiry} onChange={e => setCard({...card, expiry: e.target.value})} required style={{ flex: 1, padding: '10px', boxSizing: 'border-box' }} />
+            <input placeholder="CVC" value={card.cvv} onChange={e => setCard({...card, cvv: e.target.value})} required style={{ flex: 1, padding: '10px', boxSizing: 'border-box' }} />
+          </div>
+          <button type="submit" style={{ width: '100%', padding: '12px', background: '#2196f3', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '16px' }}>
+            Pay ₹{order.amount / 100}
+          </button>
+        </form>
+      )}
+
+      {/* PROCESSING SPINNER */}
+      {paymentStatus === 'processing' && (
+        <div style={{textAlign: 'center', padding: '20px', color: '#666'}}>
+          <div className="spinner" style={{marginBottom: '10px'}}>🔄</div>
+          Processing Secure Payment...
+        </div>
+      )}
+
     </div>
   );
 };
