@@ -1,24 +1,29 @@
 const pool = require('../config/db');
 
-const authenticateMerchant = async (req, res, next) => {
-    const apiKey = req.headers['x-api-key'];
-    const apiSecret = req.headers['x-api-secret'];
+const protect = async (req, res, next) => {
+    let apiKey;
 
-    if (!apiKey || !apiSecret) {
-        return res.status(401).json({ error: { code: "AUTHENTICATION_ERROR", description: "Invalid API credentials" } });
+    if (req.headers['x-api-key']) {
+        apiKey = req.headers['x-api-key'];
+    }
+
+    if (!apiKey) {
+        return res.status(401).json({ error: "Not authorized, no API key" });
     }
 
     try {
-        const result = await pool.query('SELECT * FROM merchants WHERE api_key = $1 AND api_secret = $2', [apiKey, apiSecret]);
+        const result = await pool.query('SELECT * FROM merchants WHERE api_key = $1', [apiKey]);
+        
         if (result.rows.length === 0) {
-            return res.status(401).json({ error: { code: "AUTHENTICATION_ERROR", description: "Invalid API credentials" } });
+            return res.status(401).json({ error: "Not authorized, invalid API key" });
         }
+
         req.merchant = result.rows[0];
         next();
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: "Server Error" });
+    } catch (error) {
+        console.error(error);
+        res.status(401).json({ error: "Not authorized, token failed" });
     }
 };
 
-module.exports = { authenticateMerchant };
+module.exports = { protect };
