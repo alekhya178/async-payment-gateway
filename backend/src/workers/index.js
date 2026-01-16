@@ -109,3 +109,43 @@ webhookQueue.process(async (job) => {
         client.release();
     }
 });
+
+
+// 3. REFUND WORKER
+refundQueue.process(async (job) => {
+    const { refundId } = job.data;
+    console.log(`Processing refund: ${refundId}`);
+    
+    const client = await pool.connect();
+    try {
+        // Simulate Bank Delay (3-5 seconds)
+        const delay = Math.floor(Math.random() * 2000) + 3000;
+        await new Promise(resolve => setTimeout(resolve, delay));
+
+        // Update Refund Status
+        await client.query(
+            "UPDATE refunds SET status = 'processed', processed_at = NOW() WHERE id = $1",
+            [refundId]
+        );
+
+        // Fetch Refund Details for Webhook
+        const res = await client.query('SELECT * FROM refunds WHERE id = $1', [refundId]);
+        const refund = res.rows[0];
+
+        // Trigger Webhook
+        webhookQueue.add({
+            merchant_id: refund.merchant_id,
+            event: 'refund.processed',
+            payload: {
+                event: 'refund.processed',
+                timestamp: Math.floor(Date.now() / 1000),
+                data: { refund }
+            }
+        });
+
+    } catch (err) {
+        console.error("Refund Worker Error:", err);
+    } finally {
+        client.release();
+    }
+});
