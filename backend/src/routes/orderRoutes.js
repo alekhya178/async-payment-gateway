@@ -1,13 +1,13 @@
 const express = require('express');
 const router = express.Router();
-const orderController = require('../controllers/orderController');
-const { authenticateMerchant } = require('../middleware/authMiddleware');
+const { createOrder, getOrder, getPublicOrder } = require('../controllers/orderController');
+const { protect } = require('../middleware/authMiddleware');
 
 // Authenticated Routes (For Merchant)
-router.post('/', authenticateMerchant, orderController.createOrder);
-router.get('/:order_id', authenticateMerchant, orderController.getOrder);
+router.post('/', protect, createOrder);
+router.get('/:order_id', protect, getOrder);
 
 // Public Routes (For Checkout Page)
-router.get('/:order_id/public', orderController.getPublicOrder);
+router.get('/:order_id/public', getPublicOrder);
 
 module.exports = router;
