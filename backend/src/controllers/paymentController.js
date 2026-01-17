@@ -199,13 +199,63 @@ const retryWebhook = async (req, res) => {
 // 10. JOB STATUS
 const getJobStatus = async (req, res) => {
     try {
-        const paymentCounts = await paymentQueue.getJobCounts();
-        const webhookCounts = await webhookQueue.getJobCounts();
-        res.json({ payment: paymentCounts, webhook: webhookCounts, status: "running" });
-    } catch (err) { res.status(500).json({ error: "Server Error" }); }
+        const counts = await paymentQueue.getJobCounts();
+        
+        // Flatten the object to match the requirements exactly
+        res.status(200).json({
+            pending: counts.waiting,
+            processing: counts.active,
+            completed: counts.completed,
+            failed: counts.failed,
+            worker_status: 'running'
+        });
+    } catch (err) { 
+        console.error("Job Status Error:", err);
+        res.status(500).json({ error: "Server Error" }); 
+    }
+};
+//11. test webhook
+const sendTestWebhook = async (req, res) => {
+    try {
+        const merchant_id = req.user.id; // User is authenticated
+        const client = await pool.connect();
+        
+        try {
+            // 1. Get the Merchant's URL
+            const result = await client.query('SELECT webhook_url FROM merchants WHERE id = $1', [merchant_id]);
+            const webhookUrl = result.rows[0]?.webhook_url;
+
+            if (!webhookUrl) {
+                return res.status(400).json({ error: "No Webhook URL configured" });
+            }
+
+            // 2. Add a Dummy Job to the Queue
+            const payload = {
+                event: 'payment.success',
+                timestamp: Math.floor(Date.now() / 1000),
+                data: { 
+                    payment: { id: "pay_test_" + Date.now(), amount: 500, status: "success" } 
+                }
+            };
+
+            await webhookQueue.add({
+                merchant_id,
+                event: 'payment.success',
+                payload
+            });
+
+            res.status(200).json({ message: "Test Webhook Queued" });
+
+        } finally {
+            client.release();
+        }
+    } catch (err) {
+        console.error("Test Webhook Error:", err);
+        res.status(500).json({ error: "Server Error" });
+    }
 };
 
 module.exports = { 
     processPayment, capturePayment, createRefund, getRefund, getPayment, 
-    getDashboardStats, getTransactions, getWebhookLogs, retryWebhook, getJobStatus 
+    getDashboardStats, getTransactions, getWebhookLogs, retryWebhook, getJobStatus ,sendTestWebhook
 };

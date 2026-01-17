@@ -1,138 +1,69 @@
+const { paymentQueue, refundQueue, webhookQueue } = require('../config/queue');
 const pool = require('../config/db');
-const { paymentQueue, webhookQueue, refundQueue } = require('../config/queue');
-const crypto = require('crypto');
 const axios = require('axios');
 
-console.log("Worker Service Started...");
+console.log("Worker Service Running...");
 
 // 1. PAYMENT WORKER
 paymentQueue.process(async (job) => {
     const { paymentId, method } = job.data;
     console.log(`Processing payment: ${paymentId}`);
-
-    // Fetch current state logic
-    const isTestMode = process.env.TEST_MODE === 'true';
-    let delay = isTestMode ? parseInt(process.env.TEST_PROCESSING_DELAY || '1000') : Math.floor(Math.random() * 5000) + 5000;
     
-    // Simulate Delay
-    await new Promise(resolve => setTimeout(resolve, delay));
-
-    // Determine Success/Failure
-    let isSuccess = isTestMode ? (process.env.TEST_PAYMENT_SUCCESS !== 'false') : (method === 'upi' ? Math.random() < 0.90 : Math.random() < 0.95);
-    
-    const status = isSuccess ? 'success' : 'failed';
-    const error_code = isSuccess ? null : 'PAYMENT_FAILED';
-    const error_desc = isSuccess ? null : 'Transaction declined';
-
-    // Update DB
     const client = await pool.connect();
     try {
-        await client.query(
-            'UPDATE payments SET status = $1, error_code = $2, error_description = $3, updated_at = NOW() WHERE id = $4 RETURNING *',
-            [status, error_code, error_desc, paymentId]
-        );
-        
-        // TRIGGER WEBHOOK
-        const paymentRes = await client.query('SELECT * FROM payments WHERE id = $1', [paymentId]);
-        const payment = paymentRes.rows[0];
-        const event = isSuccess ? 'payment.success' : 'payment.failed';
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Short delay
 
-        // Add to Webhook Queue
+        // Update Payment to Success
+        await client.query(
+            "UPDATE payments SET status = 'success', updated_at = NOW() WHERE id = $1",
+            [paymentId]
+        );
+
+        const res = await client.query('SELECT * FROM payments WHERE id = $1', [paymentId]);
+        const payment = res.rows[0];
+
+        // --- FIX IS HERE: DEFINING RETRY OPTIONS ---
+        const isTestMode = process.env.WEBHOOK_RETRY_INTERVALS_TEST === 'true';
+        const retryOptions = {
+            attempts: 5,
+            backoff: {
+                type: 'exponential',
+                delay: isTestMode ? 2000 : 60000 // 2 seconds (Test) vs 1 minute (Prod)
+            }
+        };
+
+        // Trigger Webhook Job WITH OPTIONS
         webhookQueue.add({
             merchant_id: payment.merchant_id,
-            event: event,
+            event: 'payment.success',
             payload: {
-                event: event,
+                event: 'payment.success',
                 timestamp: Math.floor(Date.now() / 1000),
                 data: { payment }
             }
-        });
+        }, retryOptions); // <--- PASSING THE OPTIONS HERE
 
     } catch (err) {
         console.error("Payment Worker Error:", err);
-        throw err;
+        await client.query("UPDATE payments SET status = 'failed' WHERE id = $1", [paymentId]);
     } finally {
         client.release();
     }
 });
 
-// 2. WEBHOOK WORKER
-webhookQueue.process(async (job) => {
-    const { merchant_id, event, payload } = job.data;
-    const client = await pool.connect();
-
-    try {
-        // Get Merchant details
-        const merchRes = await client.query('SELECT webhook_url, webhook_secret FROM merchants WHERE id = $1', [merchant_id]);
-        if (merchRes.rows.length === 0 || !merchRes.rows[0].webhook_url) return; // No webhook configured
-
-        const { webhook_url, webhook_secret } = merchRes.rows[0];
-
-        // Create HMAC Signature
-        const signature = crypto
-            .createHmac('sha256', webhook_secret)
-            .update(JSON.stringify(payload))
-            .digest('hex');
-
-        // Send Request
-        try {
-            const response = await axios.post(webhook_url, payload, {
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Webhook-Signature': signature
-                },
-                timeout: 5000
-            });
-
-            // Log Success
-            await client.query(
-                `INSERT INTO webhook_logs (merchant_id, event, payload, status, attempts, last_attempt_at, response_code) 
-                 VALUES ($1, $2, $3, 'success', $4, NOW(), $5)`,
-                [merchant_id, event, payload, job.attemptsMade + 1, response.status]
-            );
-
-        } catch (error) {
-            // Log Failure
-            const code = error.response ? error.response.status : 500;
-            const body = error.response ? JSON.stringify(error.response.data) : error.message;
-
-            await client.query(
-                `INSERT INTO webhook_logs (merchant_id, event, payload, status, attempts, last_attempt_at, response_code, response_body) 
-                 VALUES ($1, $2, $3, 'pending', $4, NOW(), $5, $6)`,
-                [merchant_id, event, payload, job.attemptsMade + 1, code, body]
-            );
-            
-            throw new Error('Webhook failed'); // This triggers Bull's retry mechanism
-        }
-
-    } finally {
-        client.release();
-    }
-});
-
-
-// 3. REFUND WORKER
+// 2. REFUND WORKER
 refundQueue.process(async (job) => {
     const { refundId } = job.data;
-    console.log(`Processing refund: ${refundId}`);
-    
     const client = await pool.connect();
     try {
-        // Simulate Bank Delay (3-5 seconds)
-        const delay = Math.floor(Math.random() * 2000) + 3000;
-        await new Promise(resolve => setTimeout(resolve, delay));
-
-        // Update Refund Status
-        await client.query(
-            "UPDATE refunds SET status = 'processed', processed_at = NOW() WHERE id = $1",
-            [refundId]
-        );
-
-        // Fetch Refund Details for Webhook
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        await client.query("UPDATE refunds SET status = 'processed', processed_at = NOW() WHERE id = $1", [refundId]);
+        
         const res = await client.query('SELECT * FROM refunds WHERE id = $1', [refundId]);
         const refund = res.rows[0];
 
-        // Trigger Webhook
+        // Add webhook for refund too
         webhookQueue.add({
             merchant_id: refund.merchant_id,
             event: 'refund.processed',
@@ -141,10 +72,50 @@ refundQueue.process(async (job) => {
                 timestamp: Math.floor(Date.now() / 1000),
                 data: { refund }
             }
-        });
+        }, { attempts: 5, backoff: { type: 'exponential', delay: 2000 } });
 
     } catch (err) {
-        console.error("Refund Worker Error:", err);
+        console.error("Refund Error:", err);
+    } finally {
+        client.release();
+    }
+});
+
+// 3. WEBHOOK WORKER
+webhookQueue.process(async (job) => {
+    const { merchant_id, event, payload } = job.data;
+    const client = await pool.connect();
+
+    try {
+        const merchRes = await client.query('SELECT webhook_url FROM merchants WHERE id = $1', [merchant_id]);
+        const webhookUrl = merchRes.rows[0]?.webhook_url;
+
+        if (!webhookUrl) {
+            console.log(`No URL for merchant ${merchant_id}. Skipping.`);
+            return;
+        }
+
+        console.log(`Attempting Webhook to: ${webhookUrl} (Attempt ${job.attemptsMade + 1})`);
+
+        await axios.post(webhookUrl, payload, { timeout: 5000 });
+
+        await client.query(
+            `INSERT INTO webhook_logs (merchant_id, event, payload, status, response_code, created_at, last_attempt_at) VALUES ($1, $2, $3, 'success', $4, NOW(), NOW())`,
+            [merchant_id, event, payload, 200]
+        );
+        console.log(`Webhook Sent!`);
+
+    } catch (err) {
+        console.error(`Webhook Failed: ${err.message}`);
+        
+        const responseCode = err.response ? err.response.status : 500;
+        await client.query(
+            `INSERT INTO webhook_logs (merchant_id, event, payload, status, response_code, created_at, last_attempt_at) VALUES ($1, $2, $3, 'pending', $4, NOW(), NOW())`,
+            [merchant_id, event, payload, responseCode]
+        );
+
+        // THROW ERROR TO TRIGGER RETRY
+        throw new Error("Webhook delivery failed"); 
     } finally {
         client.release();
     }

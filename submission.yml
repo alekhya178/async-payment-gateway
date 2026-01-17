@@ -1,0 +1,22 @@
+version: "1.0"
+project: "payment-gateway-v2"
+
+# 1. SETUP
+setup:
+  - "echo 'Setting up environment...'"
+
+# 2. START
+start:
+  - "docker-compose up -d"
+  - "echo 'Waiting for services...'"
+  - "sleep 15" 
+
+# 3. VERIFY
+verify:
+  - "curl -f http://localhost:8000/health || exit 1"
+  - "curl -f http://localhost:8000/api/v1/payments/test/jobs/status || exit 1"
+  - "curl -f http://localhost:3001/checkout.js || exit 1"
+
+# 4. SHUTDOWN
+shutdown:
+  - "docker-compose down"

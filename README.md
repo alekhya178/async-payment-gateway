@@ -1,77 +1,49 @@
-# Payment Gateway Project
+# Production-Ready Async Payment Gateway
 
-A robust, Dockerized payment gateway simulation that supports Merchant Onboarding, Order Management, and Multi-Method Payment Processing (UPI & Cards). This project demonstrates a microservices-style architecture using Node.js, React, and PostgreSQL.
+A high-performance payment infrastructure featuring asynchronous processing, resilient webhook delivery with exponential backoff, and an embeddable JavaScript SDK.
 
-## 🚀 Features
-* **Hosted Checkout Page:** Secure, user-friendly payment interface.
-* **Payment Processing:** Supports UPI (VPA validation) and Credit Cards (Luhn Algorithm & Network Detection).
-* **Merchant Dashboard:** Real-time analytics, transaction history, and API credential management.
-* **RESTful API:** Secure endpoints for creating orders and processing payments.
-* **Dockerized Deployment:** Complete environment setup with a single command.
+## Key Features
+* Asynchronous Architecture: Offloads heavy processing to a Redis-based job queue.
+* Resilient Webhooks: Automatic retries using exponential backoff.
+* Embeddable SDK: Drop-in JavaScript widget for seamless merchant integration.
 
-## 🏗️ Architecture Overview
-This system is composed of four Docker containers communicating via a private network:
+## Quick Start
 
-![Architecture Diagram](./assests/architecture_diagram.png)
+1. Start Services:
+   docker-compose up -d --build
 
-* **Frontend (Dashboard - Port 3000):** React-based interface for merchants to track sales.
-* **Frontend (Checkout - Port 3001):** Public-facing React page for customers to complete payments.
-* **Backend API (Port 8000):** Node.js/Express server handling validation, auth, and logic.
-* **Database (Port 5432):** PostgreSQL storing Merchants, Orders, and Payment records.
+2. Access Interfaces:
+   * API: http://localhost:8000
+   * Dashboard: http://localhost:3000
+   * Demo Shop: http://localhost:3001/merchant_demo.html
+   * SDK File: http://localhost:3001/checkout.js
 
-## 🛠️ Setup & Installation
+## API Documentation
 
-### Prerequisites
-* Docker & Docker Compose installed on your machine.
+### Core Endpoints
+* POST /api/v1/payments : Create a payment (Returns pending)
+* POST /api/v1/payments/:id/capture : Captures a successful payment
+* POST /api/v1/payments/:id/refunds : Initiates an async refund
+* GET /api/v1/payments/test/jobs/status : Returns Redis queue health stats
 
-### Step-by-Step Guide
-1.  **Clone the Repository:**
-    ```bash
-    git clone <your-repo-url>
-    cd payment-gateway
-    ```
+### Webhooks
+* GET /api/v1/merchant/webhooks : List delivery logs
+* POST /api/v1/merchant/webhooks/:id/retry : Manually retry a failed webhook
 
-2.  **Environment Configuration:**
-    Create a `.env` file in the root directory by copying the example:
-    ```bash
-    cp .env.example .env
-    ```
-    *Ensure `DATABASE_URL` and `PORT` variables are set correctly in `.env`.*
+## SDK Integration Guide
 
-3.  **Start the Application:**
-    Run the following command to build and start all services:
-    ```bash
-    docker-compose up -d --build
-    ```
+Merchants can integrate the gateway by including the script:
 
-4.  **Verify Installation:**
-    * **Dashboard:** [http://localhost:3000](http://localhost:3000)
-    * **Checkout Page:** (Requires an active Order ID)
-    * **API Health Check:** [http://localhost:8000/health](http://localhost:8000/health)
+<script src="http://localhost:3001/checkout.js"></script>
 
-## 🧪 Testing the System
+<script>
+  const gateway = new PaymentGateway({
+    key: 'pk_test_12345',
+    orderId: 'ord_98765',
+    onSuccess: (data) => console.log('Success:', data),
+    onFailure: (error) => console.error('Failed:', error)
+  });
 
-### Default Test Merchant
-The system automatically seeds a test merchant on startup:
-* **Email:** `test@example.com`
-* **API Key:** `key_test_abc123`
-* **API Secret:** `secret_test_xyz789`
-
-### How to Run a Test Payment
-1.  **Login to Dashboard:** Go to `http://localhost:3000/login` and use the email `test@example.com` (any password works).
-2.  **Generate an Order:** Use Postman or a curl command to create an order (see [API Documentation](./docs/API.md)).
-3.  **Complete Payment:** Use the `order_id` from the response to visit `http://localhost:3001/checkout?order_id=...`.
-4.  **Simulate Success/Failure:**
-    * **UPI:** Use `test@upi` (Success) or invalid format (Fail).
-    * **Card:** Use `4242424242424242` (Success) or `4242424242424241` (Fail/Luhn Error).
-
-## 📄 Documentation
-* [API Documentation](./docs/API.md) - Detailed endpoints and examples.
-* [Database Schema](./docs/SCHEMA.md) - Tables, fields, and relationships.
-
-## 🎥 Video Demo
-Watch the complete end-to-end payment flow (Order Creation -> Checkout -> Success -> Dashboard Verification):
-
-[**▶️ Click Here to Watch the Demo Video**](https://youtu.be/lU1Y4i80SPE)
-
----
+  // Open the modal
+  gateway.open();
+</script>

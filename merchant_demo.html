@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>My E-Commerce Store</title>
+    <style>
+        body { font-family: sans-serif; padding: 50px; text-align: center; }
+        .product { border: 1px solid #ddd; padding: 20px; width: 300px; margin: 0 auto; border-radius: 8px; }
+        button { background-color: #28a745; color: white; padding: 10px 20px; border: none; font-size: 16px; cursor: pointer; border-radius: 4px; }
+    </style>
+</head>
+<body>
+
+    <h1>My Awesome Shop</h1>
+    
+    <div class="product">
+        <h2>Running Shoes</h2>
+        <p>Price: ₹500.00</p>
+        <button id="buyBtn">Buy Now</button>
+    </div>
+
+    <p id="status" style="margin-top: 20px; color: gray;">Waiting for action...</p>
+
+    <script src="http://localhost:3001/checkout.js"></script>
+
+    <script>
+        document.getElementById('buyBtn').addEventListener('click', async () => {
+            const statusEl = document.getElementById('status');
+            statusEl.innerText = "Creating Order...";
+
+            // 2. Create Order (Simulating Merchant Backend)
+            const response = await fetch('http://localhost:8000/api/v1/orders', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-api-key': 'key_test_abc123',
+                    'x-api-secret': 'secret_test_xyz789'
+                },
+                body: JSON.stringify({ amount: 50000, currency: "INR" }) // 500.00
+            });
+            const order = await response.json();
+            
+            console.log("Order Created:", order.id);
+            statusEl.innerText = "Opening Payment Gateway...";
+
+            // 3. Initialize & Open Gateway
+            const gateway = new PaymentGateway({
+                key: 'key_test_abc123',
+                orderId: order.id,
+                onSuccess: (data) => {
+                    console.log("Success Data:", data);
+                    statusEl.innerText = "Payment Successful! Transaction ID: " + data.id;
+                    statusEl.style.color = "green";
+                },
+                onClose: () => {
+                    if (statusEl.style.color !== "green") {
+                        statusEl.innerText = "Payment Cancelled / Window Closed";
+                    }
+                }
+            });
+
+            gateway.open();
+        });
+    </script>
+
+</body>
+</html>
