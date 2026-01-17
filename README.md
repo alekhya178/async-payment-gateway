@@ -33,7 +33,7 @@ A high-performance payment infrastructure featuring asynchronous processing, res
 ## SDK Integration Guide
 
 Merchants can integrate the gateway by including the script:
-
+```bash
 <script src="http://localhost:3001/checkout.js"></script>
 
 <script>
@@ -47,3 +47,4 @@ Merchants can integrate the gateway by including the script:
   // Open the modal
   gateway.open();
 </script>
+```
