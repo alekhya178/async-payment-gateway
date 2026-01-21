@@ -48,3 +48,35 @@ Merchants can integrate the gateway by including the script:
   gateway.open();
 </script>
 ```
+
+
+## Screenshots
+1. E-commerce webpage
+
+![webpage](webpage.png)
+
+2. Transaction methods
+![transactions](payment_methods.png)
+
+3. UPI 
+![upi](payment_upi.png)
+
+4. Processing state
+
+![processing](payment_processing.png)
+
+5. Successful Transaction
+
+![success](payment_successful.png)
+
+6. Merchant Dashboard
+![dashboard](merchant_dashboard.png)
+
+7.Transactions page
+![transactions](transactions.png)
+
+8. Webhooks page
+![webhooks](webhooks.png)
+
+9. Documents Page
+![document](document.png)
